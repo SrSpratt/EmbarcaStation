@@ -36,32 +36,32 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(EmbacaStation EmbacaStation.c )
+add_executable(EmbarcaStation EmbarcaStation.c )
 
-pico_set_program_name(EmbacaStation "EmbacaStation")
-pico_set_program_version(EmbacaStation "0.1")
+pico_set_program_name(EmbarcaStation "EmbacaStation")
+pico_set_program_version(EmbarcaStation "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
-pico_enable_stdio_uart(EmbacaStation 0)
-pico_enable_stdio_usb(EmbacaStation 1)
+pico_enable_stdio_uart(EmbarcaStation 0)
+pico_enable_stdio_usb(EmbarcaStation 1)
 
 # Add the standard library to the build
-target_link_libraries(EmbacaStation
+target_link_libraries(EmbarcaStation
         pico_stdlib)
 
 # Add the standard include files to the build
-target_include_directories(EmbacaStation PRIVATE
+target_include_directories(EmbarcaStation PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_SOURCE_DIR}/lib
 )
 
 # Add any user requested libraries
-target_link_libraries(EmbacaStation 
+target_link_libraries(EmbarcaStation 
         hardware_i2c
         hardware_watchdog
         FreeRTOS-Kernel
         FreeRTOS-Kernel-Heap4
         )
 
-pico_add_extra_outputs(EmbacaStation)
+pico_add_extra_outputs(EmbarcaStation)
 
