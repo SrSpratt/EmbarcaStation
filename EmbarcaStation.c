@@ -20,8 +20,8 @@
 #include "queue.h"
 #include <math.h>
 
-#define WIFI_SSID "TEMPLATE"
-#define WIFI_PASSWORD "TEMPLATE"
+#define WIFI_SSID "Template"
+#define WIFI_PASSWORD "Template"
 
 #define WIFI_LED CYW43_WL_GPIO_LED_PIN
 #define button_a 5
@@ -41,7 +41,9 @@
 SemaphoreHandle_t xDisplayMutex;
 QueueHandle_t xConnectionStateQueue;
 QueueHandle_t xBMPReadQueue;
+QueueHandle_t xBMPReadWebQueue;
 QueueHandle_t xAHTReadQueue;
+QueueHandle_t xAHTReadWebQueue;
 
 enum ConnectionState{
     WIFI_CONNECTING,
@@ -52,6 +54,9 @@ enum ConnectionState{
 
 uint32_t time_since_last_pressing = 0;
 uint16_t regular_tick = 100;
+
+float temperature_limit = 26;
+float humidity_level = 65;
 
 ssd1306_t ssd;
 
@@ -106,6 +111,8 @@ int main()
     xConnectionStateQueue = xQueueCreate(1, sizeof(int));
     xAHTReadQueue = xQueueCreate(1, sizeof(AHT20_Data));
     xBMPReadQueue = xQueueCreate(1, sizeof(BMP280_Data));
+    xAHTReadWebQueue = xQueueCreate(1, sizeof(AHT20_Data));
+    xBMPReadWebQueue = xQueueCreate(1, sizeof(BMP280_Data));
 
     //xTaskCreate(vHelloTask, "Hello Task", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY, NULL);
     xTaskCreate(vConnectTask, "Connect task", 4096, NULL, tskIDLE_PRIORITY, NULL);
@@ -236,11 +243,77 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
     memcpy(request, p->payload, p->len);
     request[p->len] = '\0';
 
-    printf("Request: %s\n", request);
+    AHT20_Data aht_data = {
+        .humidity = 0,
+        .temperature = 0
+    };
 
-    if(strstr(request, "GET /")){
-        printf("Entrou na requisição\n");
-        char html[3200];
+    BMP280_Data bmp_data = {
+        .altitude = 0,
+        .pressure = 0,
+        .temperature = 0
+    };
+
+    xQueuePeek(xAHTReadWebQueue, &aht_data, 0);
+    xQueuePeek(xBMPReadWebQueue, &bmp_data, 0);
+    //printf("temperature: %.2f", aht_data.temperature);
+    
+
+    printf("Request: %s\n", request);
+    if (strstr(request, "GET /level") != NULL) { // Responde a requisição de tensão medida
+        char reading[256];
+        snprintf(reading, sizeof(reading), 
+                "{"
+                "\"temperature\": %.2f,"
+                "\"humidity\": %.2f,"
+                "\"pressure\": %.2f,"
+                "\"altitude\": %.2f"
+                "}", aht_data.temperature,
+                aht_data.humidity,
+                bmp_data.pressure /1000.0,
+                bmp_data.altitude);
+
+        char response[512];
+        snprintf(response, sizeof(response),
+            "HTTP/1.1 200 OK\r\n"
+            "Content-Type: text/plain\r\n"
+            "Content-Length: %d\r\n"
+            "Connection: close\r\n"
+            "\r\n"
+            "%s",
+            strlen(reading), reading);
+
+        tcp_write(tpcb, response, strlen(response), TCP_WRITE_FLAG_COPY);
+        tcp_output(tpcb);
+        printf(response);
+    } else if (strstr(request, "POST /form") != NULL) { //responde à inserção de dado via formulário
+      char *body = strstr(request, "\r\n\r\n");
+      if (body) {
+          body += 4; // pula os caracteres de nova linha
+          float temp, hum;
+          int n = sscanf(body, "temp: %f\nhum: %f", &temp, &hum);
+          if (n == 2){
+            humidity_level = hum;
+            temperature_limit = temp;
+            printf("humidity: %.2f\n", humidity_level);
+            printf("temperature: %.2f\n", temperature_limit);
+          }
+          char response_body[64];
+          snprintf(response_body, sizeof(response_body), "Temp: %.2f; Hum: %.2f", temp, hum);
+
+          char response[128];
+          snprintf(response, sizeof(response),
+              "HTTP/1.1 200 OK\r\n"
+              "Content-Type: text/plain\r\n"
+              "Content-Length: %d\r\n"
+              "Connection: close\r\n"
+              "\r\n"
+              "%s", strlen(response_body), response_body);
+          tcp_write(tpcb, response, strlen(response), TCP_WRITE_FLAG_COPY);
+          tcp_output(tpcb);
+      }
+    } else {
+        char html[4900];
 
         snprintf(html, sizeof(html),
                 "HTTP/1.1 200 OK\r\n"
@@ -279,7 +352,8 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
                                 "border-radius:10px;"
                                 "box-shadow:0 4px 6px rgba(0,0,0,0.1);"
                                 "padding:20px;"
-                                "margin-bottom:20px;}"
+                                "margin-bottom:20px;"
+                                "max-width:350px}"
                             ".content{display:flex;"
                                 "flex-direction:row;"
                                 "flex-wrap:wrap;"
@@ -303,6 +377,7 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
                             ".classifier{"
                                 "display:flex;"
                                 "gap:15px;"
+                                "justify-content:space-around"
                             "}"
                             ".card-label{"
                                 "text-align:center;"
@@ -337,6 +412,7 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
                                 "display: flex;"
                                 "margin:5px 0;"
                             "}"
+                            "canvas { max-width: 100%%; height: auto; margin-top: 20px; }\r\n"
                             ".sensor{"
                                 "font-size:12px;"
                                 "color:#495057;"
@@ -346,22 +422,7 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
                                 "display:flex;"
                                 "flex:1 1 100%%;}"
                         "</style>"
-                        "<script>"
-                            "setInterval(()=>{"
-                                "fetch('/level')"
-                                    ".then(res=>res.text())"
-                                    ".then(data=>{"
-                                        "document.getElementById(\"level\").innerText=data;"
-                                    "});"
-                            "},1000);" // atualiza a cada 1 segundo
-                            "setInterval(()=>{"
-                                "fetch('/state')"
-                                    ".then(res=>res.text())"
-                                    ".then(data=>{"
-                                        "document.getElementById(\"state\").innerText=data;"
-                                    "});"
-                            "},1000);" // atualiza a cada 1 segundo
-                        "</script>"
+                        "<script src=\"https://cdn.jsdelivr.net/npm/chart.js\"></script>"
                     "</head>"
                     "<body>"
                         "<h1>🏠 Painel</h1>"
@@ -370,15 +431,29 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
                                 "<h4>Projeto</h4>"
                                 "<div class=\"classifier\">"
                                   "<div class=\"card\">"
-                                      "<span class=\"card-label\">💧Nível de água</span>"
+                                      "<span class=\"card-label\">🌡️Temperatura</span>"
                                       "<div class=\"content\">"
-                                        "<span id=\"level\">0</span><span>0</span>"
+                                        "<span id=\"temperature\">0</span><span>ºC</span>"
                                       "</div>"
                                   "</div>"
                                   "<div class=\"card\">"
-                                      "<span class=\"card-label\">🚿Estado da bomba</span>"
+                                      "<span class=\"card-label\">☁️ Umidade</span>"
                                       "<div class=\"content\">"
-                                        "<span id=\"state\">0</span>"
+                                        "<span id=\"humidity\">0</span><span>ºC</span>"
+                                      "</div>"
+                                  "</div>"
+                                "</div>"
+                                "<div class=\"classifier\">"
+                                  "<div class=\"card\">"
+                                      "<span class=\"card-label\">☁️ Pressão</span>"
+                                      "<div class=\"content\">"
+                                        "<span id=\"pressure\">0</span><span>kPa</span>"
+                                      "</div>"
+                                  "</div>"
+                                  "<div class=\"card\">"
+                                      "<span class=\"card-label\">⛰️ Altitude</span>"
+                                      "<div class=\"content\">"
+                                        "<span id=\"altitude\">0</span><span>m</span>"
                                       "</div>"
                                   "</div>"
                                 "</div>"
@@ -387,26 +462,67 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
                                     "<div class=\"content\">"
                                         "<form id=\"level-mod\">"
                                           "<label for=\"level-min\">Min:</label>"
-                                          "<input type=\"text\" id=\"level-min\" placeholder=\"6\" required />"
+                                          "<input type=\"text\" id=\"level-hum\" placeholder=\"6\" required />"
                                           "<label for=\"level-max\">Max:</label>"
-                                          "<input type=\"text\" id=\"level-max\" placeholder=\"10\" required />"
+                                          "<input type=\"text\" id=\"level-temp\" placeholder=\"10\" required />"
                                           "<button id=\"send-btn\" type=\"button\" class=\"btn btn-p\">Enviar</button>"
                                           "<div id=\"answer\"></div>"
                                         "</form>"
                                     "</div>"
                                 "</div>"
+                            "<div class=\"card\">"
+                                "<span class=\"card-label\">📈 Histórico</span>"
+                                "<canvas id=\"myChart\" width=\"200px\" height=\"200px\" style=\"display: block; box-sizing: border-box; height: 300px; width: 300px;\"></canvas>"
+                            "</div>"
                             "</div>"
                         "</div>"
                     "</body>"
                     "<script>"
+                        "let myChart;"
+                        "const ctx=document.getElementById('myChart').getContext('2d');"
+                        "const chartData={labels:[],datasets:["
+                            "{label:'Temperatura (°C)',data:[],borderColor:'red',fill:false},"
+                            "{label:'Umidade (%%)',data:[],borderColor:'blue',fill:false}"
+                        "]};"
+                        "if (myChart){"
+                            "myChart.destroy()"
+                        "}"
+                        "myChart=new Chart(ctx,{"
+                            "type:'line',"
+                            "data:chartData,"
+                            "options:{responsive:true,animation:false,scales:{y:{beginAtZero:false}}}"
+                        "});"
+
+                        "setInterval(()=>{"
+                            "fetch('/level')"
+                                ".then(res=>res.json())"
+                                ".then(data=>{"
+                                    "document.getElementById('temperature').innerText=data.temperature;"
+                                    "document.getElementById('humidity').innerText=data.humidity;"
+                                    "document.getElementById('pressure').innerText=data.pressure;"
+                                    "document.getElementById('altitude').innerText=data.altitude;"
+
+                                    "const now=new Date().toLocaleTimeString();"
+                                    "if(chartData.labels.length>20){"
+                                        "chartData.labels.shift();"
+                                        "chartData.datasets[0].data.shift();"
+                                        "chartData.datasets[1].data.shift();"
+                                    "}"
+                                    "chartData.labels.push(now);"
+                                    "chartData.datasets[0].data.push(data.temperature);"
+                                    "chartData.datasets[1].data.push(data.humidity);"
+                                    "myChart.update();"
+
+                                "});"
+                        "},1000);"
                       "document.getElementById(\"send-btn\").addEventListener(\"click\",(e)=>{" //cria a ação de envio POST para o botão
                         "e.preventDefault();"
-                        "const max=document.getElementById(\"level-max\").value;"
-                        "const min=document.getElementById(\"level-min\").value;"
+                        "const temp=document.getElementById(\"level-temp\").value;"
+                        "const hum=document.getElementById(\"level-hum\").value;"
                         "fetch(\"/form\",{" 
                           "method: \"POST\","
                           "headers:{\"Content-Type\":\"text/plain\"},"
-                          "body:\"max: \"+max+\"\\nmin: \"+min"
+                          "body:\"hum: \"+hum+\"\\ntemp: \"+temp"
                         "})"
                         ".then(res=>res.text())"
                         ".then(data=>"
@@ -551,7 +667,7 @@ void vSensorRead(){
 
         // Cálculo da altitude
         bmp_data.altitude = calculate_altitude(bmp_data.pressure);
-        printf("tarefa do sensor!\n");
+        //printf("tarefa do sensor!\n");
         //printf("Pressao = %.3f kPa\n", bmp_data.pressure / 1000.0);
         //printf("Temperatura BMP: = %.2f C\n", bmp_data.temperature / 100.0);
         //printf("Altitude estimada: %.2f m\n", bmp_data.altitude);
@@ -566,10 +682,14 @@ void vSensorRead(){
         {
             //printf("Erro na leitura do AHT10!\n\n\n");
         }
-        if (xQueueSend(xAHTReadQueue, &aht_data, 0) != pdPASS)
+        xQueueSend(xAHTReadQueue, &aht_data, 0);
             //printf("FILA AHT CHEIA!");
-        if (xQueueSend(xBMPReadQueue, &bmp_data, 0) != pdPASS)
+        xQueueSend(xBMPReadQueue, &bmp_data, 0);
+        xQueueOverwrite(xAHTReadWebQueue, &aht_data);
+            //printf("FILA AHT CHEIA!");
+        xQueueOverwrite(xBMPReadWebQueue, &bmp_data);
             //printf("FILA BMP CHEIA!");
+        
         vTaskDelay(pdMS_TO_TICKS(300));
     }
 }
