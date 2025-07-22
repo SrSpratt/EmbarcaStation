@@ -38,7 +38,7 @@ pico_sdk_init()
 
 add_executable(EmbarcaStation EmbarcaStation.c )
 
-pico_set_program_name(EmbarcaStation "EmbacaStation")
+pico_set_program_name(EmbarcaStation "EmbarcaStation")
 pico_set_program_version(EmbarcaStation "0.1")
 
 # Modify the below lines to enable/disable output over UART/USB
