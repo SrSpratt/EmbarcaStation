@@ -45,6 +45,12 @@
 
 #define NUM_CALIB_PARAMS 24
 
+typedef struct {
+    int32_t temperature;
+    int32_t pressure;
+    double altitude;
+} BMP280_Data;
+
 struct bmp280_calib_param {
     uint16_t dig_t1;
     int16_t dig_t2;

@@ -17,7 +17,7 @@
 #define REQUEST_BUFFER_SIZE 2048
 #define MEM_LIBC_MALLOC 0
 #define MEMP_MEM_MALLOC 0
-#define TCP_WND 2048
+#define TCP_WND (4 * TCP_MSS)
 #define MEMP_NUM_PBUF 16
 #define PBUF_POOL_SIZE 32               // Ajuste conforme necessário
 #define MEMP_NUM_UDP_PCB 4

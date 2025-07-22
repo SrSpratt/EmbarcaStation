@@ -36,7 +36,11 @@ pico_sdk_init()
 
 # Add executable. Default name is the project name, version 0.1
 
-add_executable(EmbarcaStation EmbarcaStation.c )
+add_executable(EmbarcaStation 
+    EmbarcaStation.c 
+    lib/ssd1306.c
+    lib/aht20.c
+    lib/bmp280.c)
 
 pico_set_program_name(EmbarcaStation "EmbarcaStation")
 pico_set_program_version(EmbarcaStation "0.1")
