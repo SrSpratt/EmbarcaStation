@@ -29,7 +29,7 @@ set(PICO_BOARD pico_w CACHE STRING "Board type")
 include(pico_sdk_import.cmake)
 
 include(C:/FreeRTOS-Kernel/portable/ThirdParty/GCC/RP2040/FreeRTOS_Kernel_import.cmake)
-project(EmbacaStation C CXX ASM)
+project(EmbarcaStation C CXX ASM)
 
 # Initialise the Raspberry Pi Pico SDK
 pico_sdk_init()
@@ -53,10 +53,17 @@ target_link_libraries(EmbarcaStation
 target_include_directories(EmbarcaStation PRIVATE
         ${CMAKE_CURRENT_LIST_DIR}
         ${CMAKE_SOURCE_DIR}/lib
+        ${PICO_SDK_PATH}/lib/lwip/src/include/lwip
+)
+
+target_sources(${PROJECT_NAME}  PRIVATE
+        ${PICO_SDK_PATH}/lib/lwip/src/apps/http/httpd.c
+        ${PICO_SDK_PATH}/lib/lwip/src/apps/http/fs.c
 )
 
 # Add any user requested libraries
-target_link_libraries(EmbarcaStation 
+target_link_libraries(EmbarcaStation
+        pico_cyw43_arch_lwip_threadsafe_background 
         hardware_i2c
         hardware_watchdog
         FreeRTOS-Kernel
