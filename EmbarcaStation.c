@@ -55,8 +55,8 @@ enum ConnectionState{
 uint32_t time_since_last_pressing = 0;
 uint16_t regular_tick = 100;
 
-float temperature_limit = 26;
-float humidity_level = 65;
+float temperature_limit = 30;
+float humidity_level = 60;
 
 ssd1306_t ssd;
 
@@ -93,6 +93,13 @@ int main()
     gpio_set_irq_callback(&reset_board);
     irq_set_enabled(IO_IRQ_BANK0, true);
 
+    gpio_init(11);
+    gpio_init(12);
+    gpio_init(13);
+    gpio_set_dir(11, GPIO_OUT);
+    gpio_set_dir(12, GPIO_OUT);
+    gpio_set_dir(13, GPIO_OUT);
+
     // Inicia o I2C0
     i2c_init(I2C_PORT, 400 * 1000);
     gpio_set_function(I2C_SDA, GPIO_FUNC_I2C);
@@ -115,9 +122,9 @@ int main()
     xBMPReadWebQueue = xQueueCreate(1, sizeof(BMP280_Data));
 
     //xTaskCreate(vHelloTask, "Hello Task", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY, NULL);
-    xTaskCreate(vConnectTask, "Connect task", 4096, NULL, tskIDLE_PRIORITY, NULL);
-    xTaskCreate(vDisplayTask, "Display Task", configMINIMAL_STACK_SIZE, NULL, tskIDLE_PRIORITY, NULL);
-    xTaskCreate(vSensorRead, "Sensor Read", 1024, NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(vConnectTask, "Connect task", 2048, NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(vDisplayTask, "Display Task", 2048, NULL, tskIDLE_PRIORITY, NULL);
+    xTaskCreate(vSensorRead, "Sensor Read", 2048, NULL, tskIDLE_PRIORITY, NULL);
     vTaskStartScheduler();
     panic_unsupported();
 }
@@ -461,9 +468,9 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
                                     "<span class=\"card-label\">🎚️ Alterar nível</span>"
                                     "<div class=\"content\">"
                                         "<form id=\"level-mod\">"
-                                          "<label for=\"level-min\">Min:</label>"
+                                          "<label for=\"level-min\">Umidade:</label>"
                                           "<input type=\"text\" id=\"level-hum\" placeholder=\"6\" required />"
-                                          "<label for=\"level-max\">Max:</label>"
+                                          "<label for=\"level-max\">:</label>"
                                           "<input type=\"text\" id=\"level-temp\" placeholder=\"10\" required />"
                                           "<button id=\"send-btn\" type=\"button\" class=\"btn btn-p\">Enviar</button>"
                                           "<div id=\"answer\"></div>"
@@ -514,7 +521,7 @@ static err_t tcp_server_recv(void *arg, struct tcp_pcb *tpcb, struct pbuf *p, er
                                     "myChart.update();"
 
                                 "});"
-                        "},1000);"
+                        "},2000);"
                       "document.getElementById(\"send-btn\").addEventListener(\"click\",(e)=>{" //cria a ação de envio POST para o botão
                         "e.preventDefault();"
                         "const temp=document.getElementById(\"level-temp\").value;"
@@ -566,6 +573,7 @@ void vConnectTask()
     {
         connection_state = WIFI_FAILED;
         xQueueSend(xConnectionStateQueue, &connection_state, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(regular_tick));
     }
 
     cyw43_arch_gpio_put(WIFI_LED, true);
@@ -574,6 +582,7 @@ void vConnectTask()
     while(cyw43_arch_wifi_connect_timeout_ms(WIFI_SSID, WIFI_PASSWORD, CYW43_AUTH_WPA2_AES_PSK, 20000)){
         connection_state = WIFI_FAILED;
         xQueueSend(xConnectionStateQueue, &connection_state, portMAX_DELAY);
+        vTaskDelay(pdMS_TO_TICKS(regular_tick));
     }
 
     connection_state = WIFI_SUCCEEDED;
@@ -596,7 +605,7 @@ void vConnectTask()
     xQueueSend(xConnectionStateQueue, &connection_state, portMAX_DELAY);
     while (true){
         cyw43_arch_poll();
-        vTaskDelay(pdMS_TO_TICKS(regular_tick));
+        vTaskDelay(pdMS_TO_TICKS(500));
     }
 
     cyw43_arch_deinit();
@@ -627,19 +636,21 @@ void vDisplayTask()
 
   while (true)
   {
-    if (xSemaphoreTake(xDisplayMutex, portMAX_DELAY) == pdTRUE){
+    printf("tarefa do display/");
+    if (xSemaphoreTake(xDisplayMutex, pdMS_TO_TICKS(500)) == pdTRUE){
         ssd1306_rect(&ssd, 3, 3, 122, 60, color, !color); // Desenha um retângulo
 
         if (xQueueReceive(xConnectionStateQueue, &connected_state, 0) == pdTRUE)
             draw_connection(connected_state, color);
             
-        if (xQueueReceive(xAHTReadQueue, &aht_data, 0) == pdTRUE && xQueueReceive(xBMPReadQueue, &bmp_data, 0) == pdTRUE)
-            draw_on_display(color, ssd, aht_data, bmp_data ); 
+        xQueuePeek(xAHTReadQueue, &aht_data, 0);
+        xQueuePeek(xBMPReadQueue, &bmp_data, 0);
+        draw_on_display(color, ssd, aht_data, bmp_data ); 
 
         ssd1306_send_data(&ssd);                            // Atualiza o display
         xSemaphoreGive(xDisplayMutex);
     }
-    vTaskDelay(pdMS_TO_TICKS(30));
+    vTaskDelay(pdMS_TO_TICKS(500));
   }
 }
 
@@ -667,7 +678,7 @@ void vSensorRead(){
 
         // Cálculo da altitude
         bmp_data.altitude = calculate_altitude(bmp_data.pressure);
-        //printf("tarefa do sensor!\n");
+        printf("tarefa do sensor!\n");
         //printf("Pressao = %.3f kPa\n", bmp_data.pressure / 1000.0);
         //printf("Temperatura BMP: = %.2f C\n", bmp_data.temperature / 100.0);
         //printf("Altitude estimada: %.2f m\n", bmp_data.altitude);
@@ -682,14 +693,15 @@ void vSensorRead(){
         {
             //printf("Erro na leitura do AHT10!\n\n\n");
         }
-        xQueueSend(xAHTReadQueue, &aht_data, 0);
+
+        xQueueOverwrite(xAHTReadQueue, &aht_data);
             //printf("FILA AHT CHEIA!");
-        xQueueSend(xBMPReadQueue, &bmp_data, 0);
+        xQueueOverwrite(xBMPReadQueue, &bmp_data);
         xQueueOverwrite(xAHTReadWebQueue, &aht_data);
             //printf("FILA AHT CHEIA!");
         xQueueOverwrite(xBMPReadWebQueue, &bmp_data);
             //printf("FILA BMP CHEIA!");
         
-        vTaskDelay(pdMS_TO_TICKS(300));
+        vTaskDelay(pdMS_TO_TICKS(700));
     }
 }
